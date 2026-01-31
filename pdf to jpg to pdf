@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Editor - Paper Size Standard & Ultra HD</title>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root { --primary: #28a745; --accent: #ffc107; --danger: #dc3545; --bg: #e9ecef; }
+        body { font-family: 'Sarabun', sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        
+        .main-toolbar {
+            position: sticky; top: 10px; z-index: 1000; background: white; padding: 15px;
+            border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 15px;
+            flex-wrap: wrap; justify-content: center; align-items: center; width: 95%;
+        }
+
+        .tool-group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #ddd; padding-right: 12px; }
+        
+        .tool-icon {
+            width: 42px; height: 42px; border-radius: 8px; border: 2px solid #ddd;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+            font-size: 18px; background: #fff; transition: 0.2s;
+        }
+        .tool-icon.active { border-color: var(--primary); background: #e8f5e9; transform: scale(1.05); }
+
+        #page-list { display: flex; flex-wrap: wrap; gap: 30px; justify-content: center; width: 100%; margin-top: 20px; }
+
+        .page-card {
+            background: white; border: 2px solid var(--primary); border-radius: 8px;
+            position: relative; width: fit-content; height: fit-content; transition: border-color 0.2s;
+            padding-bottom: 40px;
+        }
+        .page-card:hover { border-color: var(--accent); }
+        
+        .rotate-btn {
+            position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+            background: #f8f9fa; border: 1px solid #ccc; border-radius: 20px;
+            padding: 4px 12px; cursor: pointer; font-size: 12px; font-weight: bold; z-index: 105;
+        }
+
+        .format-selection { display: flex; gap: 10px; font-size: 13px; font-weight: bold; }
+        .format-selection label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+
+        button, select { cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: white; font-weight: bold; font-family: inherit; }
+        .btn-main { background: var(--primary) !important; color: white; border: none; }
+        .btn-warn { background: #fff3cd; color: #856404; }
+        
+        .save-options { display: flex; flex-direction: column; gap: 5px; }
+    </style>
+</head>
+<body>
+
+    <div class="main-toolbar">
+        <div class="tool-group">
+            <button onclick="toggleSelectAll(true)">เลือกทั้งหมด</button>
+            <button onclick="toggleSelectAll(false)">ไม่เลือก</button>
+        </div>
+
+        <div class="tool-group">
+            <div class="tool-icon active" id="btn-brush" onclick="setTool('brush')">🖌️</div>
+            <div class="tool-icon" id="btn-highlighter" onclick="setTool('highlighter')">🖍️</div>
+            <div class="tool-icon" id="btn-line" onclick="setTool('line')">📏</div>
+        </div>
+
+        <div class="tool-group">
+            <input type="color" id="pen-color" value="#ffff00" onchange="updateBrushSettings()">
+            <input type="number" id="pen-width" value="1" min="1" max="100" style="width: 50px;" onchange="updateBrushSettings()">
+            <input type="range" id="pen-opacity" min="0.1" max="1" step="0.1" value="1.0" style="width: 60px;" onchange="updateBrushSettings()">
+        </div>
+
+        <div class="tool-group">
+            <button class="btn-warn" onclick="clearAllDrawings()">🗑️ ล้างวาด</button>
+        </div>
+
+        <div class="tool-group" style="border:none; gap: 15px;">
+            <div class="save-options">
+                <div class="format-selection">
+                    <span>ฟอร์แมต: </span>
+                    <label><input type="checkbox" class="save-fmt" value="pdf" checked> PDF</label>
+                    <label><input type="checkbox" class="save-fmt" value="jpg"> JPG</label>
+                    <label><input type="checkbox" class="save-fmt" value="png"> PNG</label>
+                </div>
+                <div style="display:flex; gap:5px;">
+                    <select id="page-size">
+                        <option value="A4" selected>ขนาดกระดาษ A4</option>
+                        <option value="LEGAL">ขนาดกระดาษ Legal</option>
+                        <option value="LETTER">ขนาดกระดาษ Letter</option>
+                        <option value="ORIGINAL">ขนาดตามไฟล์จริง</option>
+                    </select>
+                    <select id="save-mode">
+                        <option value="merged">รวมไฟล์เดียว</option>
+                        <option value="split">แยกไฟล์หน้า (ZIP)</option>
+                    </select>
+                    <button class="btn-main" onclick="handleExport()">💾 Download</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="drop-zone" style="width: 80%; padding: 15px; border: 2px dashed #999; text-align: center; background: white; border-radius: 10px; cursor: pointer; margin: 20px 0;">
+        ลากไฟล์มาวางที่นี่ - ตั้งค่าเริ่มต้นเซฟเป็น A4 ความละเอียดสูง
+    </div>
+
+    <input type="file" id="file-input" multiple accept="application/pdf,image/*" style="display: none;">
+    <div id="page-list"></div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        const pageList = document.getElementById('page-list');
+        const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
+        let canvases = {};
+        let currentTool = 'brush';
+
+        // ค่าพิกเซลของขนาดกระดาษที่ 72 DPI (สำหรับ PDF)
+        const SIZES = {
+            'A4': { w: 595.28, h: 841.89 },
+            'LEGAL': { w: 612.0, h: 1008.0 },
+            'LETTER': { w: 612.0, h: 792.0 }
+        };
+
+        function setTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('.tool-icon').forEach(el => el.classList.remove('active'));
+            const map = { brush: 'btn-brush', highlighter: 'btn-highlighter', line: 'btn-line' };
+            document.getElementById(map[tool]).classList.add('active');
+            const w = document.getElementById('pen-width');
+            const o = document.getElementById('pen-opacity');
+            if (tool === 'highlighter') { w.value = 10; o.value = 0.4; }
+            else if (tool === 'brush') { w.value = 1; o.value = 1.0; }
+            updateBrushSettings();
+        }
+
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => handleFiles(e.target.files);
+        dropZone.ondragover = (e) => e.preventDefault();
+        dropZone.ondrop = (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); };
+
+        async function handleFiles(files) {
+            for (const file of files) {
+                if (file.type === 'application/pdf') {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        await createPageElement(page, i);
+                    }
+                } else { await createPageElementFromImg(file); }
+            }
+        }
+
+        async function createPageElement(pdfPage, num) {
+            const id = 'p-' + Math.random().toString(36).substr(2, 9);
+            const viewportHD = pdfPage.getViewport({scale: 3.0});
+            const viewportView = pdfPage.getViewport({scale: 1.0});
+            
+            const card = document.createElement('div');
+            card.className = 'page-card'; card.id = id;
+            card.innerHTML = `<input type="checkbox" class="page-checkbox" checked style="position:absolute; top:8px; left:8px; z-index:100;"><button class="rotate-btn" onclick="rotatePage('${id}')">🔄 หมุน 90°</button>`;
+            const canvasEl = document.createElement('canvas');
+            card.appendChild(canvasEl);
+            pageList.appendChild(card);
+
+            const fCanvas = new fabric.Canvas(canvasEl, { width: viewportView.width * 0.4, height: viewportView.height * 0.4, isDrawingMode: true });
+            const tempCanvas = document.createElement('canvas');
+            const context = tempCanvas.getContext('2d');
+            tempCanvas.width = viewportHD.width; tempCanvas.height = viewportHD.height;
+            await pdfPage.render({canvasContext: context, viewport: viewportHD}).promise;
+
+            fabric.Image.fromURL(tempCanvas.toDataURL('image/jpeg', 0.9), (img) => {
+                img.scale( (viewportView.width * 0.4) / viewportHD.width );
+                fCanvas.setBackgroundImage(img, fCanvas.renderAll.bind(fCanvas));
+            });
+
+            canvases[id] = { fCanvas, origW: viewportView.width, origH: viewportView.height, currentRotation: 0, baseDisplayW: viewportView.width * 0.4 };
+            setupCanvasEvents(canvases[id]);
+            updateBrushSettings();
+        }
+
+        function setupCanvasEvents(item) {
+            const fCanvas = item.fCanvas;
+            let isDown, line;
+            fCanvas.on('mouse:down', function(o) {
+                if (currentTool === 'brush') return;
+                isDown = true;
+                const pointer = fCanvas.getPointer(o.e);
+                line = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
+                    strokeWidth: parseInt(document.getElementById('pen-width').value),
+                    stroke: document.getElementById('pen-color').value,
+                    opacity: parseFloat(document.getElementById('pen-opacity').value),
+                    selectable: false, evented: false, strokeLineCap: 'round',
+                    originX: 'center', originY: 'center',
+                    globalCompositeOperation: currentTool === 'highlighter' ? 'multiply' : 'source-over'
+                });
+                fCanvas.add(line);
+            });
+            fCanvas.on('mouse:move', function(o) {
+                if (!isDown) return;
+                const pointer = fCanvas.getPointer(o.e);
+                if (currentTool === 'highlighter') line.set({ x2: pointer.x, y2: line.y1 });
+                else line.set({ x2: pointer.x, y2: pointer.y });
+                fCanvas.renderAll();
+            });
+            fCanvas.on('mouse:up', () => isDown = false);
+            fCanvas.on('mouse:wheel', function(opt) {
+                const delta = opt.e.deltaY;
+                let zoom = fCanvas.getZoom() * (0.999 ** delta);
+                zoom = Math.min(Math.max(zoom, 0.05), 20);
+                const isPortrait = item.currentRotation % 180 === 0;
+                const bW = isPortrait ? item.baseDisplayW : (item.baseDisplayW * (item.origH/item.origW));
+                const bH = isPortrait ? (item.baseDisplayW * (item.origH/item.origW)) : item.baseDisplayW;
+                fCanvas.setDimensions({ width: bW * zoom, height: bH * zoom });
+                fCanvas.setZoom(zoom);
+                opt.e.preventDefault(); opt.e.stopPropagation();
+            });
+        }
+
+        async function handleExport() {
+            const formats = Array.from(document.querySelectorAll('.save-fmt:checked')).map(el => el.value);
+            const mode = document.getElementById('save-mode').value;
+            const pageSizeKey = document.getElementById('page-size').value;
+            const selected = Array.from(document.querySelectorAll('.page-card')).filter(c => c.querySelector('.page-checkbox').checked);
+            
+            if (selected.length === 0 || formats.length === 0) return alert("กรุณาเลือกไฟล์และนามสกุล");
+
+            const zip = new JSZip();
+            const { PDFDocument } = PDFLib;
+            const mergedPdf = await PDFDocument.create();
+
+            for (let i = 0; i < selected.length; i++) {
+                const item = canvases[selected[i].id];
+                const f = item.fCanvas;
+                
+                // กำหนดขนาดหน้ากระดาษปลายทาง
+                let targetW, targetH;
+                const isPortrait = item.currentRotation % 180 === 0;
+
+                if (pageSizeKey === 'ORIGINAL') {
+                    targetW = isPortrait ? item.origW : item.origH;
+                    targetH = isPortrait ? item.origH : item.origW;
+                } else {
+                    targetW = SIZES[pageSizeKey].w;
+                    targetH = SIZES[pageSizeKey].h;
+                }
+
+                // Render ด้วยความละเอียดสูง (300 DPI โดยประมาณ = multiplier 4.16 จาก 72 DPI)
+                // เพื่อความรวดเร็วและคงสัดส่วนเดิม ใช้ multiplier ตามขนาดต้นฉบับ
+                const multiplier = item.origW / f.width * f.getZoom();
+
+                for (let fmt of formats) {
+                    const dataUrl = f.toDataURL({ format: fmt === 'pdf' ? 'jpeg' : fmt, quality: 1.0, multiplier: multiplier });
+                    
+                    if (fmt === 'pdf') {
+                        const img = await mergedPdf.embedJpg(dataUrl);
+                        const page = mergedPdf.addPage([targetW, targetH]);
+                        
+                        // คำนวณ Scale ให้รูปภาพพอดีกระดาษ (Fit to Page)
+                        const scale = Math.min(targetW / img.width, targetH / img.height);
+                        const x = (targetW - img.width * scale) / 2;
+                        const y = (targetH - img.height * scale) / 2;
+
+                        page.drawImage(img, { x, y, width: img.width * scale, height: img.height * scale });
+                        
+                        if (mode === 'split') {
+                            const singlePdf = await PDFDocument.create();
+                            const [cp] = await singlePdf.copyPages(mergedPdf, [mergedPdf.getPageCount()-1]);
+                            singlePdf.addPage(cp);
+                            zip.file(`page_${i+1}_${pageSizeKey}.pdf`, await singlePdf.save());
+                        }
+                    } else {
+                        const b64 = dataUrl.split(',')[1];
+                        zip.file(`page_${i+1}.${fmt}`, b64, {base64: true});
+                    }
+                }
+            }
+
+            if (formats.includes('pdf') && mode === 'merged') {
+                download(await mergedPdf.save(), `document_${pageSizeKey}.pdf`, "application/pdf");
+            }
+            if (formats.length > 1 || mode === 'split' || !formats.includes('pdf')) {
+                const content = await zip.generateAsync({type: "blob"});
+                download(content, "export_standard_size.zip", "application/zip");
+            }
+        }
+
+        function rotatePage(id) {
+            const item = canvases[id];
+            item.currentRotation = (item.currentRotation + 90) % 360;
+            const f = item.fCanvas;
+            const isPortrait = item.currentRotation % 180 === 0;
+            const ratio = item.origH / item.origW;
+            const newW = isPortrait ? item.baseDisplayW : (item.baseDisplayW * ratio);
+            const newH = isPortrait ? (item.baseDisplayW * ratio) : item.baseDisplayW;
+            f.setDimensions({ width: newW, height: newH });
+            const center = f.getCenter();
+            f.backgroundImage.set({ angle: item.currentRotation, left: center.left, top: center.top, originX: 'center', originY: 'center' });
+            f.renderAll();
+        }
+
+        function updateBrushSettings() {
+            const color = document.getElementById('pen-color').value;
+            const width = parseInt(document.getElementById('pen-width').value);
+            const opacity = parseFloat(document.getElementById('pen-opacity').value);
+            Object.values(canvases).forEach(item => {
+                item.fCanvas.isDrawingMode = (currentTool === 'brush');
+                if (item.fCanvas.freeDrawingBrush) {
+                    item.fCanvas.freeDrawingBrush.color = color;
+                    item.fCanvas.freeDrawingBrush.width = width;
+                    item.fCanvas.freeDrawingBrush.opacity = opacity;
+                }
+            });
+        }
+
+        function clearAllDrawings() {
+            if(!confirm("ล้างการวาดทุกหน้า?")) return;
+            Object.values(canvases).forEach(item => {
+                item.fCanvas.getObjects().forEach(obj => { if (obj !== item.fCanvas.backgroundImage) item.fCanvas.remove(obj); });
+            });
+        }
+
+        function toggleSelectAll(s) { document.querySelectorAll('.page-checkbox').forEach(cb => cb.checked = s); }
+        function download(data, name, type) {
+            const blob = new Blob([data], { type });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob); link.download = name; link.click();
+        }
+
+        async function createPageElementFromImg(file) {
+            const id = 'p-' + Math.random().toString(36).substr(2, 9);
+            const url = URL.createObjectURL(file);
+            fabric.Image.fromURL(url, (img) => {
+                const card = document.createElement('div');
+                card.className = 'page-card'; card.id = id;
+                card.innerHTML = `<input type="checkbox" class="page-checkbox" checked style="position:absolute; top:8px; left:8px; z-index:100;"><button class="rotate-btn" onclick="rotatePage('${id}')">🔄 หมุน 90°</button>`;
+                const canvasEl = document.createElement('canvas');
+                card.appendChild(canvasEl);
+                pageList.appendChild(card);
+                const fCanvas = new fabric.Canvas(canvasEl, { width: img.width*0.2, height: img.height*0.2, isDrawingMode: true });
+                img.scale(0.2); fCanvas.setBackgroundImage(img, fCanvas.renderAll.bind(fCanvas));
+                canvases[id] = { fCanvas, origW: img.width, origH: img.height, currentRotation: 0, baseDisplayW: img.width*0.2 };
+                setupCanvasEvents(canvases[id]); updateBrushSettings();
+            });
+        }
+    </script>
+</body>
+</html>
